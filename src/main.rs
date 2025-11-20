@@ -6,7 +6,7 @@ fn main() {
     app.add_plugins((DefaultPlugins, PhysicsPlugins::default()));
     app.add_systems(Startup, setup);
     app.add_systems(Update, (control_stick_1, control_stick_2));
-    app.add_systems(Update, print_started_collisions);
+    app.add_systems(Update, (print_started_collisions, ball_went_past_a_paddle));
 
     app.run();
 }
@@ -15,7 +15,10 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
+    let ball_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
+    commands.insert_resource(CollisionSound(ball_collision_sound));
     commands.spawn(Camera2d);
     let shape = Rectangle::new(20.0, 100.0);
     let mesh = meshes.add(shape);
@@ -74,21 +77,21 @@ fn setup(
     // });
 
     commands.spawn(WallBundle {
-        
-        transform: Transform::from_xyz( 270.0,0.0, 0.0),
+        transform: Transform::from_xyz(400.0, 0.0, 0.0),
         rigid_body: RigidBody::Static,
         collider: Collider::rectangle(10.0, 500.0),
-        game_item_type: GameItemType(GameItem::LowerBoundary),
-        sensor:Sensor
+        game_item_type: GameItemType(GameItem::RightWall),
+        sensor: Sensor,
+        wall_marker: Wall,
     });
 
     commands.spawn(WallBundle {
-        
-        transform: Transform::from_xyz( -270.0,0.0, 0.0),
+        transform: Transform::from_xyz(-400.0, 0.0, 0.0),
         rigid_body: RigidBody::Static,
         collider: Collider::rectangle(10.0, 500.0),
-        game_item_type: GameItemType(GameItem::LowerBoundary),
-        sensor:Sensor
+        game_item_type: GameItemType(GameItem::LeftWall),
+        sensor: Sensor,
+        wall_marker: Wall,
     });
 
     let shape = Circle::new(20.0);
@@ -139,7 +142,9 @@ fn control_stick_2(
 fn print_started_collisions(
     mut collision_reader: MessageReader<CollisionStart>,
     mut ball_query: Query<&mut LinearVelocity, With<Ball>>,
-    query: Query<&GameItemType>,
+    query: Query<&GameItemType, Without<Wall>>,
+    mut commands: Commands,
+    sound: Res<CollisionSound>,
 ) {
     for event in collision_reader.read() {
         let mut rng = rand::rng();
@@ -147,78 +152,116 @@ fn print_started_collisions(
         if let Ok(mut linear_velocity) = ball_query.get_mut(collider1) {
             let collider2 = event.collider2;
             if let Ok(game_item_type) = query.get(collider2) {
-                println!("b4 new velocity is {:?}",linear_velocity);
+                commands.spawn((AudioPlayer(sound.clone()), PlaybackSettings::DESPAWN));
 
                 match game_item_type.0 {
                     GameItem::RightPaddle => {
-                        linear_velocity.y = ((rng.random::<f64>()) as f32) * 100.0 ;
+                        linear_velocity.y = rng.random_range(-200.0..200.0);
                         linear_velocity.x = -200.0;
                     }
                     GameItem::LeftPaddle => {
-                        linear_velocity.y = ((rng.random::<f64>()) as f32) * 100.0 ;
+                        linear_velocity.y = rng.random_range(-200.0..200.0);
                         linear_velocity.x = 200.0;
                     }
                     GameItem::UpperBoundary => {
-                        if linear_velocity.x>=0.0{
+                        if linear_velocity.x >= 0.0 {
                             linear_velocity.x = 200.0;
-                        }else{
+                        } else {
                             linear_velocity.x = -200.0;
                         }
                         linear_velocity.y = rng.random_range(-100.0..=-1.0);
                     }
                     GameItem::LowerBoundary => {
-                        if linear_velocity.x>=0.0{
+                        if linear_velocity.x >= 0.0 {
                             linear_velocity.x = 200.0;
-                        }else{
+                        } else {
                             linear_velocity.x = -200.0;
                         }
                         linear_velocity.y = rng.random_range(0.0..=100.0);
                     }
-                    GameItem::LeftWall => todo!(),
-                    GameItem::RightWall => todo!(),
+                    _ => {}
                 };
-                println!("new velocity is {:?}",linear_velocity);
-                println!("collider 1");
             };
         };
         let collider2 = event.collider2;
         if let Ok(mut linear_velocity) = ball_query.get_mut(collider2)
-            && let Ok(game_item_type) = query.get(collider1) {
-                    match game_item_type.0 {
-                        GameItem::RightPaddle => {
-                        linear_velocity.y = ((rng.random::<f64>()) as f32) * 100.0 ;
+            && let Ok(game_item_type) = query.get(collider1)
+        {
+            commands.spawn((AudioPlayer(sound.clone()), PlaybackSettings::DESPAWN));
+            match game_item_type.0 {
+                GameItem::RightPaddle => {
+                    linear_velocity.y = rng.random_range(-200.0..200.0);
+                    linear_velocity.x = -200.0;
+                }
+                GameItem::LeftPaddle => {
+                    linear_velocity.y = rng.random_range(-200.0..200.0);
+                    linear_velocity.x = 200.0;
+                }
+                GameItem::UpperBoundary => {
+                    if linear_velocity.x >= 0.0 {
+                        linear_velocity.x = 200.0;
+                    } else {
                         linear_velocity.x = -200.0;
                     }
-                    GameItem::LeftPaddle => {
-                        linear_velocity.y = ((rng.random::<f64>()) as f32) * 100.0 ;
+                    linear_velocity.y = rng.random_range(-100.0..=-1.0);
+                }
+                GameItem::LowerBoundary => {
+                    if linear_velocity.x >= 0.0 {
                         linear_velocity.x = 200.0;
+                    } else {
+                        linear_velocity.x = -200.0;
                     }
-                    GameItem::UpperBoundary => {
-                        if linear_velocity.x>=0.0{
-                            linear_velocity.x = 200.0;
-                        }else{
-                            linear_velocity.x = -200.0;
-                        }
-                        linear_velocity.y = rng.random_range(-100.0..=-1.0);
-                    }
-                    GameItem::LowerBoundary => {
-                        if linear_velocity.x>=0.0{
-                            linear_velocity.x = 200.0;
-                        }else{
-                            linear_velocity.x = -200.0;
-                        }
-                        linear_velocity.y = rng.random_range(0.0..=100.0);
-                    }
-                    GameItem::LeftWall => todo!(),
-                    GameItem::RightWall => todo!(),
-                    };
-                    println!("new velocity is {:?}",linear_velocity);
-                    println!("collider 2");
-            };
+                    linear_velocity.y = rng.random_range(0.0..=100.0);
+                }
+                _ => {}
+            }
+            println!("new velocity is {:?}", linear_velocity);
+            println!("collider 2");
+        };
         println!(
             "{} and {} started colliding",
             event.collider1, event.collider2
         );
+    }
+}
+
+fn ball_went_past_a_paddle(
+    mut collision_reader: MessageReader<CollisionStart>,
+    mut ball_query: Query<&mut Transform, With<Ball>>,
+    query: Query<&GameItemType, With<Wall>>,
+) {
+    let mut ball_transform = ball_query.single_mut().unwrap();
+    for event in collision_reader.read() {
+        let collider1 = event.collider1;
+        let collider2 = event.collider2;
+        if let Ok(game_item_type) = query.get(collider2) {
+            match game_item_type.0 {
+                GameItem::LeftWall => {
+                    ball_transform.translation = Vec3::ZERO;
+                    println!("hit a wall");
+                }
+                GameItem::RightWall => {
+                    ball_transform.translation = Vec3::ZERO;
+                    println!("hit a wall");
+                }
+                _ => {}
+            };
+            break;
+        };
+        if let Ok(game_item_type) = query.get(collider1) {
+            match game_item_type.0 {
+                GameItem::LeftWall => {
+                    ball_transform.translation = Vec3::ZERO;
+                    println!("hit a wall");
+                }
+                GameItem::RightWall => {
+                    ball_transform.translation = Vec3::ZERO;
+                    println!("hit a wall");
+                }
+                _ => {}
+            };
+            break;
+        };
     }
 }
 
@@ -255,14 +298,14 @@ struct BoundaryBundle {
     game_item_type: GameItemType,
 }
 
-
 #[derive(Bundle)]
 struct WallBundle {
     transform: Transform,
     rigid_body: RigidBody,
     collider: Collider,
-    sensor:Sensor,
+    sensor: Sensor,
     game_item_type: GameItemType,
+    wall_marker: Wall,
 }
 #[derive(Bundle)]
 struct BallBundle {
@@ -289,13 +332,19 @@ struct Ball;
 #[derive(Component)]
 struct Boundary;
 
+#[derive(Component)]
+struct Wall;
+
 enum GameItem {
     RightPaddle,
     LeftPaddle,
     UpperBoundary,
     LowerBoundary,
     LeftWall,
-    RightWall
+    RightWall,
 }
 #[derive(Component)]
 struct GameItemType(GameItem);
+
+#[derive(Resource, Deref)]
+struct CollisionSound(Handle<AudioSource>);
