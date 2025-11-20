@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use rand::Rng;
@@ -7,8 +9,44 @@ fn main() {
     app.add_systems(Startup, setup);
     app.add_systems(Update, (control_stick_1, control_stick_2));
     app.add_systems(Update, (print_started_collisions, ball_went_past_a_paddle));
-
+    app.add_systems(PostUpdate, reset_ball);
     app.run();
+}
+const SCOREBOARD_FONT_SIZE: f32 = 33.0;
+const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
+const TEXT_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);
+const SCORE_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);
+fn set_up_score_board(mut commands: Commands){
+    commands.spawn((
+        Text::new("Score: "),
+        TextFont {
+            font_size: SCOREBOARD_FONT_SIZE,
+            ..default()
+        },
+        TextColor(TEXT_COLOR),
+        ScoreboardUi,
+        Node {
+            position_type: PositionType::Absolute,
+            top: SCOREBOARD_TEXT_PADDING,
+            left: SCOREBOARD_TEXT_PADDING,
+            ..default()
+        },
+        children![(
+            TextSpan::default(),
+            TextFont {
+                font_size: SCOREBOARD_FONT_SIZE,
+                ..default()
+            },
+            TextColor(SCORE_COLOR),
+        ),(
+            TextSpan::default(),
+            TextFont {
+                font_size: SCOREBOARD_FONT_SIZE,
+                ..default()
+            },
+            TextColor(SCORE_COLOR),
+        )],
+    ));
 }
 
 fn setup(
@@ -17,6 +55,10 @@ fn setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
+    commands.insert_resource(BallSpawnConfig {
+        // create the repeating timer
+        timer: Timer::new(Duration::from_secs(5), TimerMode::Repeating),
+    });
     let ball_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
     commands.insert_resource(CollisionSound(ball_collision_sound));
     commands.spawn(Camera2d);
@@ -98,6 +140,10 @@ fn setup(
     let mesh = meshes.add(shape);
     let color = Color::Srgba(Srgba::rgb(1.0, 0.647, 0.0));
     let material = materials.add(color);
+    commands.insert_resource(BallMeshAndMaterial {
+        mesh: mesh.clone(),
+        material: material.clone(),
+    });
     commands.spawn(BallBundle {
         mesh: Mesh2d(mesh),
         material: MeshMaterial2d(material),
@@ -110,6 +156,34 @@ fn setup(
         bounciness: Restitution::new(1.0),
         events_enabled: CollisionEventsEnabled,
     });
+}
+fn reset_ball(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut ball_spawn_config: ResMut<BallSpawnConfig>,
+    query: Query<(), With<Ball>>,
+    ball_material_and_mesh: Res<BallMeshAndMaterial>,
+) {
+    match query.single() {
+        Ok(_) => {}
+        Err(_) => {
+            ball_spawn_config.timer.tick(time.delta());
+            if ball_spawn_config.timer.is_finished() {
+                commands.spawn(BallBundle {
+                    mesh: Mesh2d(ball_material_and_mesh.mesh.clone()),
+                    material: MeshMaterial2d(ball_material_and_mesh.material.clone()),
+                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                    ball_id: Ball,
+                    rigid_body: RigidBody::Dynamic,
+                    collider: Collider::circle(20.0),
+                    velocity: LinearVelocity(Vec2::new(500.0, 0.0)),
+                    gravity: GravityScale(0.0),
+                    bounciness: Restitution::new(1.0),
+                    events_enabled: CollisionEventsEnabled,
+                });
+            }
+        }
+    }
 }
 
 fn control_stick_1(
@@ -169,7 +243,7 @@ fn print_started_collisions(
                         } else {
                             linear_velocity.x = -200.0;
                         }
-                        linear_velocity.y = rng.random_range(-100.0..=-1.0);
+                        linear_velocity.y = rng.random_range(-200.0..=-1.0);
                     }
                     GameItem::LowerBoundary => {
                         if linear_velocity.x >= 0.0 {
@@ -177,7 +251,7 @@ fn print_started_collisions(
                         } else {
                             linear_velocity.x = -200.0;
                         }
-                        linear_velocity.y = rng.random_range(0.0..=100.0);
+                        linear_velocity.y = rng.random_range(0.0..=200.0);
                     }
                     _ => {}
                 };
@@ -203,7 +277,7 @@ fn print_started_collisions(
                     } else {
                         linear_velocity.x = -200.0;
                     }
-                    linear_velocity.y = rng.random_range(-100.0..=-1.0);
+                    linear_velocity.y = rng.random_range(-200.0..=-1.0);
                 }
                 GameItem::LowerBoundary => {
                     if linear_velocity.x >= 0.0 {
@@ -211,55 +285,33 @@ fn print_started_collisions(
                     } else {
                         linear_velocity.x = -200.0;
                     }
-                    linear_velocity.y = rng.random_range(0.0..=100.0);
+                    linear_velocity.y = rng.random_range(0.0..=200.0);
                 }
                 _ => {}
             }
-            println!("new velocity is {:?}", linear_velocity);
-            println!("collider 2");
         };
-        println!(
-            "{} and {} started colliding",
-            event.collider1, event.collider2
-        );
     }
 }
 
 fn ball_went_past_a_paddle(
     mut collision_reader: MessageReader<CollisionStart>,
-    mut ball_query: Query<&mut Transform, With<Ball>>,
+    mut ball_query: Query<Entity, With<Ball>>,
     query: Query<&GameItemType, With<Wall>>,
+    mut commands: Commands,
 ) {
-    let mut ball_transform = ball_query.single_mut().unwrap();
+    let ball_entity = match ball_query.single_mut(){
+        Ok(val) => val,
+        Err(_) => return,
+    };
     for event in collision_reader.read() {
         let collider1 = event.collider1;
         let collider2 = event.collider2;
-        if let Ok(game_item_type) = query.get(collider2) {
-            match game_item_type.0 {
-                GameItem::LeftWall => {
-                    ball_transform.translation = Vec3::ZERO;
-                    println!("hit a wall");
-                }
-                GameItem::RightWall => {
-                    ball_transform.translation = Vec3::ZERO;
-                    println!("hit a wall");
-                }
-                _ => {}
-            };
+        if query.get(collider2).is_ok() {
+            commands.entity(ball_entity).despawn();
             break;
         };
-        if let Ok(game_item_type) = query.get(collider1) {
-            match game_item_type.0 {
-                GameItem::LeftWall => {
-                    ball_transform.translation = Vec3::ZERO;
-                    println!("hit a wall");
-                }
-                GameItem::RightWall => {
-                    ball_transform.translation = Vec3::ZERO;
-                    println!("hit a wall");
-                }
-                _ => {}
-            };
+        if query.get(collider1).is_ok() {
+            commands.entity(ball_entity).despawn();
             break;
         };
     }
@@ -348,3 +400,29 @@ struct GameItemType(GameItem);
 
 #[derive(Resource, Deref)]
 struct CollisionSound(Handle<AudioSource>);
+
+#[derive(Resource)]
+struct BallSpawnConfig {
+    /// How often to spawn a new bomb? (repeating timer)
+    timer: Timer,
+}
+
+#[derive(Resource)]
+struct BallMeshAndMaterial {
+    /// How often to spawn a new bomb? (repeating timer)
+    mesh: Handle<Mesh>,
+    material: Handle<ColorMaterial>,
+}
+
+#[derive(Component)]
+struct ScoreboardUi;
+
+
+#[derive(Resource)]
+struct PlayerScores {
+    /// How often to spawn a new bomb? (repeating timer)
+    player1: usize,
+    player2: usize
+}
+
+
