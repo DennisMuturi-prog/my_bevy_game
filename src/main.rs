@@ -7,6 +7,7 @@ fn main() {
     let mut app = App::new();
     app.add_plugins((DefaultPlugins, PhysicsPlugins::default()));
     app.add_systems(Startup, setup);
+    app.add_systems(Startup, set_up_score_board);
     app.add_systems(Update, (control_stick_1, control_stick_2));
     app.add_systems(Update, (print_started_collisions, ball_went_past_a_paddle));
     app.add_systems(PostUpdate, reset_ball);
@@ -16,7 +17,11 @@ const SCOREBOARD_FONT_SIZE: f32 = 33.0;
 const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
 const TEXT_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);
 const SCORE_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);
-fn set_up_score_board(mut commands: Commands){
+fn set_up_score_board(mut commands: Commands) {
+    commands.insert_resource(PlayerScores {
+        player1: 0,
+        player2: 0,
+    });
     commands.spawn((
         Text::new("Score: "),
         TextFont {
@@ -29,23 +34,28 @@ fn set_up_score_board(mut commands: Commands){
             position_type: PositionType::Absolute,
             top: SCOREBOARD_TEXT_PADDING,
             left: SCOREBOARD_TEXT_PADDING,
+            // flex_direction:FlexDirection::Row,
+            // column_gap:Val::Px(10.0),
             ..default()
         },
-        children![(
-            TextSpan::default(),
-            TextFont {
-                font_size: SCOREBOARD_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SCORE_COLOR),
-        ),(
-            TextSpan::default(),
-            TextFont {
-                font_size: SCOREBOARD_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SCORE_COLOR),
-        )],
+        children![
+            (
+                TextSpan("Player1: 0".to_string()),
+                TextFont {
+                    font_size: SCOREBOARD_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(SCORE_COLOR),
+            ),
+            (
+                TextSpan("Player2: 0".to_string()),
+                TextFont {
+                    font_size: SCOREBOARD_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(SCORE_COLOR),
+            )
+        ],
     ));
 }
 
@@ -186,31 +196,27 @@ fn reset_ball(
     }
 }
 
-fn control_stick_1(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut Transform, With<Player1>>,
-) {
-    let mut player1 = query.single_mut().unwrap();
+fn control_stick_1(keys: Res<ButtonInput<KeyCode>>, mut player: Single<&mut Transform, With<Player1>>) {
 
     if keys.pressed(KeyCode::ArrowUp) {
-        player1.translation.y += 5.0;
+        println!("i was pressed");
+        let movement=player.translation.y+5.0;
+        player.translation.y=movement.min(200.0);
     }
     if keys.pressed(KeyCode::ArrowDown) {
-        player1.translation.y -= 5.0;
+        let movement=player.translation.y-5.0;
+        player.translation.y=movement.max(-200.0);
     }
 }
 
-fn control_stick_2(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut Transform, With<Player2>>,
-) {
-    let mut player2 = query.single_mut().unwrap();
-
+fn control_stick_2(keys: Res<ButtonInput<KeyCode>>, mut player: Single<&mut Transform, With<Player2>>) {
     if keys.pressed(KeyCode::KeyW) {
-        player2.translation.y += 5.0;
+        let movement=player.translation.y+5.0;
+        player.translation.y=movement.min(200.0);
     }
     if keys.pressed(KeyCode::KeyS) {
-        player2.translation.y -= 5.0;
+        let movement=player.translation.y-5.0;
+        player.translation.y=movement.max(-200.0);
     }
 }
 fn print_started_collisions(
@@ -298,21 +304,51 @@ fn ball_went_past_a_paddle(
     mut ball_query: Query<Entity, With<Ball>>,
     query: Query<&GameItemType, With<Wall>>,
     mut commands: Commands,
+    mut score: ResMut<PlayerScores>,
+    score_root: Single<Entity, (With<ScoreboardUi>, With<Text>)>,
+    mut writer: TextUiWriter,
 ) {
-    let ball_entity = match ball_query.single_mut(){
+    let ball_entity = match ball_query.single_mut() {
         Ok(val) => val,
         Err(_) => return,
     };
     for event in collision_reader.read() {
         let collider1 = event.collider1;
         let collider2 = event.collider2;
-        if query.get(collider2).is_ok() {
-            commands.entity(ball_entity).despawn();
-            break;
+        if let Ok(game_item_type) = query.get(collider2) {
+            match game_item_type.0 {
+                GameItem::LeftWall => {
+                    commands.entity(ball_entity).despawn();
+                    score.player2 += 1;
+                    *writer.text(*score_root, 2) = format!("Player2: {}", score.player2);
+                    break;
+                }
+                GameItem::RightWall => {
+                    commands.entity(ball_entity).despawn();
+                    score.player1 += 1;
+                    *writer.text(*score_root, 1) = format!("Player1: {}", score.player1);
+                    break;
+                }
+                _ => {}
+            }
         };
-        if query.get(collider1).is_ok() {
-            commands.entity(ball_entity).despawn();
-            break;
+
+        if let Ok(game_item_type) = query.get(collider1) {
+            match game_item_type.0 {
+                GameItem::LeftWall => {
+                    commands.entity(ball_entity).despawn();
+                    score.player2 += 1;
+                    *writer.text(*score_root, 2) = format!("Player2: {}", score.player2);
+                    break;
+                }
+                GameItem::RightWall => {
+                    commands.entity(ball_entity).despawn();
+                    score.player1 += 1;
+                    *writer.text(*score_root, 1) = format!("Player1: {}", score.player1);
+                    break;
+                }
+                _ => {}
+            }
         };
     }
 }
@@ -337,6 +373,7 @@ struct PlayingStick2Bundle {
     rigid_body: RigidBody,
     collider: Collider,
     game_item_type: GameItemType,
+    
 }
 
 #[derive(Bundle)]
@@ -409,7 +446,6 @@ struct BallSpawnConfig {
 
 #[derive(Resource)]
 struct BallMeshAndMaterial {
-    /// How often to spawn a new bomb? (repeating timer)
     mesh: Handle<Mesh>,
     material: Handle<ColorMaterial>,
 }
@@ -417,12 +453,8 @@ struct BallMeshAndMaterial {
 #[derive(Component)]
 struct ScoreboardUi;
 
-
 #[derive(Resource)]
 struct PlayerScores {
-    /// How often to spawn a new bomb? (repeating timer)
     player1: usize,
-    player2: usize
+    player2: usize,
 }
-
-
