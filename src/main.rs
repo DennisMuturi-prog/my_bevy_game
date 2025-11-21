@@ -2,14 +2,14 @@ use std::time::Duration;
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
-use rand::Rng;
+use rand::seq::IndexedRandom;
 fn main() {
     let mut app = App::new();
     app.add_plugins((DefaultPlugins, PhysicsPlugins::default()));
     app.add_systems(Startup, setup);
     app.add_systems(Startup, set_up_score_board);
     app.add_systems(Update, (control_stick_1, control_stick_2));
-    app.add_systems(Update, (print_started_collisions, ball_went_past_a_paddle));
+    app.add_systems(Update, (started_collisions, ball_went_past_a_paddle));
     app.add_systems(PostUpdate, reset_ball);
     app.run();
 }
@@ -17,6 +17,7 @@ const SCOREBOARD_FONT_SIZE: f32 = 33.0;
 const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
 const TEXT_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);
 const SCORE_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);
+const SPEEDS:[f32;8]=[-200.0,-150.0,-100.0,-50.0,50.0,100.0,150.0,200.0];
 fn set_up_score_board(mut commands: Commands) {
     commands.insert_resource(PlayerScores {
         player1: 0,
@@ -115,32 +116,26 @@ fn setup(
         boundary_marker: Boundary,
         game_item_type: GameItemType(GameItem::UpperBoundary),
     });
-
-    // let shape = Rectangle::new(10.0, 500.0);
-    // let mesh = meshes.add(shape);
-    // commands.spawn(BoundaryBundle {
-    //     mesh: Mesh2d(mesh.clone()),
-    //     material: MeshMaterial2d(material.clone()),
-    //     transform: Transform::from_xyz( -270.0,0.0, 0.0),
-    //     rigid_body: RigidBody::Static,
-    //     collider: Collider::rectangle(10.0, 500.0),
-    //     boundary_marker: Boundary,
-    //     game_item_type: GameItemType(GameItem::LowerBoundary),
-    // });
+    let shape = Rectangle::new(5.0, 500.0);
+    let mesh = meshes.add(shape);
 
     commands.spawn(WallBundle {
+        mesh: Mesh2d(mesh.clone()),
+        material: MeshMaterial2d(material.clone()),
         transform: Transform::from_xyz(400.0, 0.0, 0.0),
         rigid_body: RigidBody::Static,
-        collider: Collider::rectangle(10.0, 500.0),
+        collider: Collider::rectangle(5.0, 500.0),
         game_item_type: GameItemType(GameItem::RightWall),
         sensor: Sensor,
         wall_marker: Wall,
     });
 
     commands.spawn(WallBundle {
+        mesh: Mesh2d(mesh),
+        material: MeshMaterial2d(material),
         transform: Transform::from_xyz(-400.0, 0.0, 0.0),
         rigid_body: RigidBody::Static,
-        collider: Collider::rectangle(10.0, 500.0),
+        collider: Collider::rectangle(5.0, 500.0),
         game_item_type: GameItemType(GameItem::LeftWall),
         sensor: Sensor,
         wall_marker: Wall,
@@ -163,7 +158,7 @@ fn setup(
         collider: Collider::circle(20.0),
         velocity: LinearVelocity(Vec2::new(500.0, 0.0)),
         gravity: GravityScale(0.0),
-        bounciness: Restitution::new(1.0),
+        // bounciness: Restitution::new(1.0),
         events_enabled: CollisionEventsEnabled,
     });
 }
@@ -188,7 +183,7 @@ fn reset_ball(
                     collider: Collider::circle(20.0),
                     velocity: LinearVelocity(Vec2::new(500.0, 0.0)),
                     gravity: GravityScale(0.0),
-                    bounciness: Restitution::new(1.0),
+                    // bounciness: Restitution::new(1.0),
                     events_enabled: CollisionEventsEnabled,
                 });
             }
@@ -199,7 +194,6 @@ fn reset_ball(
 fn control_stick_1(keys: Res<ButtonInput<KeyCode>>, mut player: Single<&mut Transform, With<Player1>>) {
 
     if keys.pressed(KeyCode::ArrowUp) {
-        println!("i was pressed");
         let movement=player.translation.y+5.0;
         player.translation.y=movement.min(200.0);
     }
@@ -219,7 +213,7 @@ fn control_stick_2(keys: Res<ButtonInput<KeyCode>>, mut player: Single<&mut Tran
         player.translation.y=movement.max(-200.0);
     }
 }
-fn print_started_collisions(
+fn started_collisions(
     mut collision_reader: MessageReader<CollisionStart>,
     mut ball_query: Query<&mut LinearVelocity, With<Ball>>,
     query: Query<&GameItemType, Without<Wall>>,
@@ -234,13 +228,15 @@ fn print_started_collisions(
             if let Ok(game_item_type) = query.get(collider2) {
                 commands.spawn((AudioPlayer(sound.clone()), PlaybackSettings::DESPAWN));
 
+                let choice = *(SPEEDS.choose(&mut rng).unwrap());
+                println!("choice is {}",choice);
                 match game_item_type.0 {
                     GameItem::RightPaddle => {
-                        linear_velocity.y = rng.random_range(-200.0..200.0);
+                        linear_velocity.y = choice;
                         linear_velocity.x = -200.0;
                     }
                     GameItem::LeftPaddle => {
-                        linear_velocity.y = rng.random_range(-200.0..200.0);
+                        linear_velocity.y = choice;
                         linear_velocity.x = 200.0;
                     }
                     GameItem::UpperBoundary => {
@@ -249,7 +245,7 @@ fn print_started_collisions(
                         } else {
                             linear_velocity.x = -200.0;
                         }
-                        linear_velocity.y = rng.random_range(-200.0..=-1.0);
+                        linear_velocity.y = *(SPEEDS[0..=3].choose(&mut rng).unwrap());
                     }
                     GameItem::LowerBoundary => {
                         if linear_velocity.x >= 0.0 {
@@ -257,7 +253,7 @@ fn print_started_collisions(
                         } else {
                             linear_velocity.x = -200.0;
                         }
-                        linear_velocity.y = rng.random_range(0.0..=200.0);
+                        linear_velocity.y = *(SPEEDS[4..].choose(&mut rng).unwrap());
                     }
                     _ => {}
                 };
@@ -268,13 +264,15 @@ fn print_started_collisions(
             && let Ok(game_item_type) = query.get(collider1)
         {
             commands.spawn((AudioPlayer(sound.clone()), PlaybackSettings::DESPAWN));
+            let choice = *(SPEEDS.choose(&mut rng).unwrap());
+            println!("choice is {}",choice);
             match game_item_type.0 {
                 GameItem::RightPaddle => {
-                    linear_velocity.y = rng.random_range(-200.0..200.0);
+                    linear_velocity.y = choice;
                     linear_velocity.x = -200.0;
                 }
                 GameItem::LeftPaddle => {
-                    linear_velocity.y = rng.random_range(-200.0..200.0);
+                    linear_velocity.y = choice;
                     linear_velocity.x = 200.0;
                 }
                 GameItem::UpperBoundary => {
@@ -283,7 +281,7 @@ fn print_started_collisions(
                     } else {
                         linear_velocity.x = -200.0;
                     }
-                    linear_velocity.y = rng.random_range(-200.0..=-1.0);
+                    linear_velocity.y = *(SPEEDS[0..=3].choose(&mut rng).unwrap());
                 }
                 GameItem::LowerBoundary => {
                     if linear_velocity.x >= 0.0 {
@@ -291,7 +289,7 @@ fn print_started_collisions(
                     } else {
                         linear_velocity.x = -200.0;
                     }
-                    linear_velocity.y = rng.random_range(0.0..=200.0);
+                    linear_velocity.y = *(SPEEDS[4..].choose(&mut rng).unwrap());
                 }
                 _ => {}
             }
@@ -389,6 +387,8 @@ struct BoundaryBundle {
 
 #[derive(Bundle)]
 struct WallBundle {
+    mesh: Mesh2d,
+    material: MeshMaterial2d<ColorMaterial>,
     transform: Transform,
     rigid_body: RigidBody,
     collider: Collider,
@@ -406,7 +406,6 @@ struct BallBundle {
     collider: Collider,
     velocity: LinearVelocity,
     gravity: GravityScale,
-    bounciness: Restitution,
     events_enabled: CollisionEventsEnabled,
 }
 #[derive(Component)]
