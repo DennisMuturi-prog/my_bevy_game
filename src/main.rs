@@ -87,8 +87,6 @@ fn set_up_score_board(mut commands: Commands) {
             position_type: PositionType::Absolute,
             top: SCOREBOARD_TEXT_PADDING,
             left: SCOREBOARD_TEXT_PADDING,
-            // flex_direction:FlexDirection::Row,
-            // column_gap:Val::Px(10.0),
             ..default()
         },
         children![
