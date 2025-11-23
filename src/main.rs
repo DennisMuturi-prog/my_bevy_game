@@ -6,18 +6,70 @@ use rand::seq::IndexedRandom;
 fn main() {
     let mut app = App::new();
     app.add_plugins((DefaultPlugins, PhysicsPlugins::default()));
+    app.init_state::<GameState>();
+    app.add_systems(OnEnter(GameState::BallLoading), setup_countdown_ui);
     app.add_systems(Startup, setup);
     app.add_systems(Startup, set_up_score_board);
     app.add_systems(Update, (control_stick_1, control_stick_2));
-    app.add_systems(Update, (started_collisions, ball_went_past_a_paddle));
-    app.add_systems(PostUpdate, reset_ball);
+    app.add_systems(
+        Update,
+        (
+            started_collisions,
+            ball_went_past_a_paddle,
+            trigger_loading_ui,
+        ),
+    );
+    app.add_systems(Update, reset_ball.run_if(in_state(GameState::BallLoading)));
     app.run();
+}
+#[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
+enum GameState {
+    BallLoading,
+    #[default]
+    Game,
 }
 const SCOREBOARD_FONT_SIZE: f32 = 33.0;
 const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
 const TEXT_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);
 const SCORE_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);
-const SPEEDS:[f32;8]=[-200.0,-150.0,-100.0,-50.0,50.0,100.0,150.0,200.0];
+const SPEEDS: [f32; 8] = [-200.0, -150.0, -100.0, -50.0, 50.0, 100.0, 150.0, 200.0];
+fn setup_countdown_ui(mut commands: Commands) {
+    commands.spawn((
+        DespawnOnExit(GameState::BallLoading),
+        Node {
+            width: percent(100),
+            height: percent(100),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        children![(
+            Text::new("Game restarting in "),
+            TextFont {
+                font_size: SCOREBOARD_FONT_SIZE,
+                ..default()
+            },
+            TextColor(TEXT_COLOR),
+            LoadingUi,
+            // Node {
+            //     position_type: PositionType::Absolute,
+            //     top: SCOREBOARD_TEXT_PADDING,
+            //     left: SCOREBOARD_TEXT_PADDING,
+            //     ..default()
+            // },
+            children![
+                (
+                    TextSpan::default(),
+                    TextFont {
+                        font_size: SCOREBOARD_FONT_SIZE,
+                        ..default()
+                    },
+                    TextColor(SCORE_COLOR),
+                )
+            ],
+        )],
+    ));
+}
 fn set_up_score_board(mut commands: Commands) {
     commands.insert_resource(PlayerScores {
         player1: 0,
@@ -166,51 +218,55 @@ fn reset_ball(
     time: Res<Time>,
     mut commands: Commands,
     mut ball_spawn_config: ResMut<BallSpawnConfig>,
-    query: Query<(), With<Ball>>,
     ball_material_and_mesh: Res<BallMeshAndMaterial>,
+    mut writer: TextUiWriter,
+    score_root: Single<Entity, With<LoadingUi>>,
+    mut game_state: ResMut<NextState<GameState>>,
 ) {
-    match query.single() {
-        Ok(_) => {}
-        Err(_) => {
-            ball_spawn_config.timer.tick(time.delta());
-            if ball_spawn_config.timer.is_finished() {
-                commands.spawn(BallBundle {
-                    mesh: Mesh2d(ball_material_and_mesh.mesh.clone()),
-                    material: MeshMaterial2d(ball_material_and_mesh.material.clone()),
-                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                    ball_id: Ball,
-                    rigid_body: RigidBody::Dynamic,
-                    collider: Collider::circle(20.0),
-                    velocity: LinearVelocity(Vec2::new(500.0, 0.0)),
-                    gravity: GravityScale(0.0),
-                    // bounciness: Restitution::new(1.0),
-                    events_enabled: CollisionEventsEnabled,
-                });
-            }
-        }
+    *writer.text(*score_root, 1) = (5-ball_spawn_config.timer.elapsed_secs() as i32 ).to_string();
+    ball_spawn_config.timer.tick(time.delta());
+    if ball_spawn_config.timer.is_finished() {
+        game_state.set(GameState::Game);
+        commands.spawn(BallBundle {
+            mesh: Mesh2d(ball_material_and_mesh.mesh.clone()),
+            material: MeshMaterial2d(ball_material_and_mesh.material.clone()),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            ball_id: Ball,
+            rigid_body: RigidBody::Dynamic,
+            collider: Collider::circle(20.0),
+            velocity: LinearVelocity(Vec2::new(500.0, 0.0)),
+            gravity: GravityScale(0.0),
+            // bounciness: Restitution::new(1.0),
+            events_enabled: CollisionEventsEnabled,
+        });
     }
 }
 
-fn control_stick_1(keys: Res<ButtonInput<KeyCode>>, mut player: Single<&mut Transform, With<Player1>>) {
-
+fn control_stick_1(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut player: Single<&mut Transform, With<Player1>>,
+) {
     if keys.pressed(KeyCode::ArrowUp) {
-        let movement=player.translation.y+5.0;
-        player.translation.y=movement.min(200.0);
+        let movement = player.translation.y + 5.0;
+        player.translation.y = movement.min(200.0);
     }
     if keys.pressed(KeyCode::ArrowDown) {
-        let movement=player.translation.y-5.0;
-        player.translation.y=movement.max(-200.0);
+        let movement = player.translation.y - 5.0;
+        player.translation.y = movement.max(-200.0);
     }
 }
 
-fn control_stick_2(keys: Res<ButtonInput<KeyCode>>, mut player: Single<&mut Transform, With<Player2>>) {
+fn control_stick_2(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut player: Single<&mut Transform, With<Player2>>,
+) {
     if keys.pressed(KeyCode::KeyW) {
-        let movement=player.translation.y+5.0;
-        player.translation.y=movement.min(200.0);
+        let movement = player.translation.y + 5.0;
+        player.translation.y = movement.min(200.0);
     }
     if keys.pressed(KeyCode::KeyS) {
-        let movement=player.translation.y-5.0;
-        player.translation.y=movement.max(-200.0);
+        let movement = player.translation.y - 5.0;
+        player.translation.y = movement.max(-200.0);
     }
 }
 fn started_collisions(
@@ -229,7 +285,7 @@ fn started_collisions(
                 commands.spawn((AudioPlayer(sound.clone()), PlaybackSettings::DESPAWN));
 
                 let choice = *(SPEEDS.choose(&mut rng).unwrap());
-                println!("choice is {}",choice);
+                println!("choice is {}", choice);
                 match game_item_type.0 {
                     GameItem::RightPaddle => {
                         linear_velocity.y = choice;
@@ -265,7 +321,7 @@ fn started_collisions(
         {
             commands.spawn((AudioPlayer(sound.clone()), PlaybackSettings::DESPAWN));
             let choice = *(SPEEDS.choose(&mut rng).unwrap());
-            println!("choice is {}",choice);
+            println!("choice is {}", choice);
             match game_item_type.0 {
                 GameItem::RightPaddle => {
                     linear_velocity.y = choice;
@@ -351,6 +407,24 @@ fn ball_went_past_a_paddle(
     }
 }
 
+fn trigger_loading_ui(
+    mut collision_reader: MessageReader<CollisionStart>,
+    query: Query<&GameItemType, With<Wall>>,
+    mut game_state: ResMut<NextState<GameState>>,
+) {
+    for event in collision_reader.read() {
+        let collider1 = event.collider1;
+        let collider2 = event.collider2;
+        if query.get(collider2).is_ok() {
+            game_state.set(GameState::BallLoading);
+        };
+
+        if query.get(collider1).is_ok() {
+            game_state.set(GameState::BallLoading);
+        };
+    }
+}
+
 #[derive(Bundle)]
 struct PlayingStickBundle {
     mesh: Mesh2d,
@@ -371,7 +445,6 @@ struct PlayingStick2Bundle {
     rigid_body: RigidBody,
     collider: Collider,
     game_item_type: GameItemType,
-    
 }
 
 #[derive(Bundle)]
@@ -451,6 +524,9 @@ struct BallMeshAndMaterial {
 
 #[derive(Component)]
 struct ScoreboardUi;
+
+#[derive(Component)]
+struct LoadingUi;
 
 #[derive(Resource)]
 struct PlayerScores {
